@@ -1,4 +1,4 @@
-function [SectorDataC, ForceDataC, TotalT, LapLength] = LapModel(CP,AP,CourseName)
+function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,AP,CourseName)
 
 %     CourseData is an array containing information about the track data
 %     % Firt Column : X - Coordinates of track
@@ -23,6 +23,8 @@ function [SectorDataC, ForceDataC, TotalT, LapLength] = LapModel(CP,AP,CourseNam
 %     % Sixth Column : Rear Power for Segment
 %     % Seventh Column :    
 
+MotorLimit_500V = load("MotorLimit_500V.mat");
+MotorLimit_500V = MotorLimit_500V.MotorLimit_500V;
 CrseData = CourseName;
 rho = 1.225;
 [CfdragT, CfdownT] = AeroMap(AP); %Call to aeromap function which combines the effects of drag and downforce from each individual element
@@ -98,15 +100,31 @@ for i = 2:length(CrseData)  % Loop through all track points with acceleration fo
             
             OutputPower(i) = (Ffx(i)+Frx(i))*velA(i-1);
             
+%             if OutputPower(i) > CP.Pmax*CP.MechEff
+%                 
+%               
+%                 
+%             end
+            
+            WheelRpm = velA(i-1)*60/(2*pi*CP.Rtire);
+            MotorRpm = WheelRpm*CP.Nratio;
+            MaxWheelTorque = interp1(MotorLimit_500V(:,1), MotorLimit_500V(:,2),MotorRpm,'nearest')*CP.Nratio;
+            
+            if Ffx(i)*CP.Rtire > MaxWheelTorque*2
+                Ffx(i) = MaxWheelTorque*2/CP.Rtire; 
+            end
+            
+            if Frx(i)*CP.Rtire > MaxWheelTorque*2
+                Frx(i) = MaxWheelTorque*2/CP.Rtire; 
+            end
+            
             if OutputPower(i) > CP.Pmax*CP.MechEff
-                
-                d = (CP.Pmax*CP.MechEff)/(OutputPower(i));
+                 d = (CP.Pmax*CP.MechEff)/(OutputPower(i));
                 
                 Ffx(i) = Ffx(i)*d;
                 Frx(i) = Frx(i)*d;
-                
             end
-            
+
               accelA(i) = (Ffx(i) + Frx(i) - Fdrag1*velA(i-1)^2)/CP.CarMass;
               velA(i) = sqrt(velA(i-1)^2 + 2*accelA(i)*CrseData(i,4));  
             
@@ -312,5 +330,7 @@ end
 
   EnergyUse = sum(SectorDataC(:,7)) + sum(SectorDataC(:,8));
   EnergyUsed = EnergyUse/(1000*3600);
-  
+  %figure
+  %plot(SectorDataC(:,3),ForceDataC(:,3)*CP.Rtire, SectorDataC(:,3), ForceDataC(:,4)*CP.Rtire)
+   
 end

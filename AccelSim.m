@@ -1,14 +1,14 @@
-function  [AccelSimResults, AccelPowerResults] = AccelSim(CP,AP, Drag_Var, Down_Var)
+function  [AccelSimResults, AccelPowerResults, TotalT] = AccelSim(CP,AP)
 
 
 
       rho = 1.225;
      [CfdragT, CfdownT] = AeroMap(AP);
-     Fdrag1 = 1/2*rho*CfdragT*Drag_Var;   %Calculates Fdrag prime which is simply the collection of constants such that Drag Force = Fdrag1*Velocity^2 
-     Fdown1 = 1/2*rho*CfdownT*Down_Var;
+     Fdrag1 = 1/2*rho*CfdragT; %*Drag_Var;   %Calculates Fdrag prime which is simply the collection of constants such that Drag Force = Fdrag1*Velocity^2 
+     Fdown1 = 1/2*rho*CfdownT; %*Down_Var;
 
     
-       dt = 0.01;
+     dt = 0.01;
      Distance_Max = 75; %m
     
      i = 1;
@@ -96,7 +96,6 @@ function  [AccelSimResults, AccelPowerResults] = AccelSim(CP,AP, Drag_Var, Down_
        
        AccelPowerResults = [max(Pf), max(Pr)];
        
-       
        AccelSimResults(:,1) = Ffz(:);  % Ffz
        AccelSimResults(:,2) = Frz(:);  % Frz
        AccelSimResults(:,3) = Ffx(:);  % Ffx
@@ -111,6 +110,6 @@ function  [AccelSimResults, AccelPowerResults] = AccelSim(CP,AP, Drag_Var, Down_
        AccelSimResults(:,12) = pos(:);
        AccelSimResults(:,13) = t(:);
        AccelSimResults(:,14) = Fdrag(:);
-
+       TotalT = t(end);
 
 end
