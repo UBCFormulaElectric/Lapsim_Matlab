@@ -29,6 +29,7 @@ CrseData = CourseName;
 rho = 1.225;
 [CfdragT, CfdownT] = AeroMap(AP); %Call to aeromap function which combines the effects of drag and downforce from each individual element
 
+MotorLimitSpeed = 19900*(2*pi*CP.Rtire)/(60*CP.Nratio);
 
 Fdrag1 = 1/2*rho*CfdragT;   %Calculates Fdrag prime which is simply the collection of constants such that Drag Force = Fdrag1*Velocity^2
 Fdown1 = 1/2*rho*CfdownT;
@@ -72,7 +73,7 @@ for i = 2:length(CrseData)  % Loop through all track points with acceleration fo
         if velA(i-1) > VmaxA(i)   % If incoming velocity is greater than the theoretical max velocity at this point 
             
             velA(i) = VmaxA(i);   % Set velocity of current segment to theoretical max
-            accelA(i) = 0; %Fdrag1*velA(i-1)^2/CP.CarMass; 
+            accelA(i) = 0; %-Fdrag1*velA(i-1)^2/CP.CarMass; 
             
             if C == 1      % If front limited
                 
@@ -86,26 +87,47 @@ for i = 2:length(CrseData)  % Loop through all track points with acceleration fo
                 
             end
             
-            Frx(i) = 1/2*Fdrag1*velA(i-1)^2; 
-            Ffx(i) = 1/2*Fdrag1*velA(i-1)^2;
+            Frx(i) = 0; %1/2*Fdrag1*velA(i-1)^2; 
+%             Ffx(i) = 0;
+            Ffx(i) = 0; %1/2*Fdrag1*velA(i-1)^2;
             
+        elseif velA(i-1) > MotorLimitSpeed
+            
+            velA(i) = MotorLimitSpeed;   % Set velocity of current segment to theoretical max
+            accelA(i) = 0; %-Fdrag1*velA(i-1)^2/CP.CarMass; 
+            
+%             if C == 1      % If front limited
+%                 
+%                 Ffy(i) = Ffz(i-1)*CP.TireCf;
+%                 Fry(i) = Ffy(i)*(CP.WheelBase - CP.CG(1))/CP.CG(1);
+%                 
+%             elseif C == 2   % If rear limited    
+%                 
+%                 Fry(i) = Frz(i-1)*CP.TireCf;
+%                 Ffy(i) = Fry(i)*CP.CG(1)/(CP.WheelBase - CP.CG(1));
+%                 
+%             end
+            Ffy(i) = FfyReq;
+            Fry(i) = FryReq;
+
+           
+            Frx(i) = 0; %1/2*Fdrag1*velA(i-1)^2; 
+           
+            Ffx(i) = 0; %1/2*Fdrag1*velA(i-1)^2;  
         else
-            
             Ffy(i) = FfyReq;
             Fry(i) = FryReq;
             
+            %%% HERE
             Ffx(i) = sqrt((CP.TireCf*Ffz(i-1))^2-Ffy(i)^2);
+            %Ffx(i) = 0;
             Frx(i) = sqrt((CP.TireCf*Frz(i-1))^2-Fry(i)^2);
             
             
             OutputPower(i) = (Ffx(i)+Frx(i))*velA(i-1);
             
-%             if OutputPower(i) > CP.Pmax*CP.MechEff
-%                 
-%               
-%                 
-%             end
-            
+
+            %% Uncomment From Here for 4wd %%%%
             WheelRpm = velA(i-1)*60/(2*pi*CP.Rtire);
             MotorRpm = WheelRpm*CP.Nratio;
             MaxWheelTorque = interp1(MotorLimit_500V(:,1), MotorLimit_500V(:,2),MotorRpm,'nearest')*CP.Nratio;
@@ -124,16 +146,17 @@ for i = 2:length(CrseData)  % Loop through all track points with acceleration fo
                 Ffx(i) = Ffx(i)*d;
                 Frx(i) = Frx(i)*d;
             end
-
+             
               accelA(i) = (Ffx(i) + Frx(i) - Fdrag1*velA(i-1)^2)/CP.CarMass;
               velA(i) = sqrt(velA(i-1)^2 + 2*accelA(i)*CrseData(i,4));  
             
         end
-      
+        %Ffx(i) = 0;
+        %Frx(i) = 0;
         posA(i) = posA(i-1)+CrseData(i,4);
-       
         
-        a = [1 1 CP.CarMass*9.81+Fdown1*velA(i-1)^2; -(CP.WheelBase - CP.CG(1)) CP.CG(1) (Frx(i)+Ffx(i))*CP.CG(2)+Fdown1*velA(i-1)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velA(i-1)^2*(AP.CP(2) - CP.CG(2))];
+        
+        a = [1 1 CP.CarMass*9.81+Fdown1*velA(i-1)^2; (CP.WheelBase - CP.CG(1)) -CP.CG(1) (Frx(i)+Ffx(i))*CP.CG(2)+Fdown1*velA(i-1)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velA(i-1)^2*(AP.CP(2) - CP.CG(2))];
         b = rref(a);
         
         Ffz(i) = b(1,3);
@@ -218,6 +241,7 @@ for i = 2:length(CrseData)   % Loops through all track points assuming braking f
             Fry(i) = FryReq;
             
             Ffx(i) = sqrt((CP.TireCf*Ffz(i-1))^2-Ffy(i)^2);
+            %Ffx(i) = 0;
             Frx(i) = sqrt((CP.TireCf*Frz(i-1))^2-Fry(i)^2);
             
             
@@ -240,7 +264,7 @@ for i = 2:length(CrseData)   % Loops through all track points assuming braking f
         posB(i) = posB(i-1)-CrseData(i,4);
         
         
-        a = [1 1 CP.CarMass*9.81+Fdown1*velB(i-1)^2; -(CP.WheelBase - CP.CG(1)) CP.CG(1) -(Frx(i)+Ffx(i))*CP.CG(2)+Fdown1*velB(i-1)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velB(i-1)^2*(AP.CP(2) - CP.CG(2))];
+        a = [1 1 CP.CarMass*9.81+Fdown1*velB(i-1)^2; +(CP.WheelBase - CP.CG(1)) -CP.CG(1) -(Frx(i)+Ffx(i))*CP.CG(2)+Fdown1*velB(i-1)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velB(i-1)^2*(AP.CP(2) - CP.CG(2))];
         b = rref(a);
         
         Ffz(i) = b(1,3);
@@ -316,11 +340,11 @@ end
   for i = 1:length(SectorDataC)
     
       if SectorDataC(i,5) > 0
-          SectorDataC(i,7) = (SectorDataC(i,5)/CP.MechEff)*SectorDataC(i,4);
+          SectorDataC(i,7) = (SectorDataC(i,5)/CP.MechEff)*SectorDataC(i,4)*2;
       end
       
       if SectorDataC(i,6) > 0
-          SectorDataC(i,8) = (SectorDataC(i,6)/CP.MechEff)*SectorDataC(i,4);  
+          SectorDataC(i,8) = (SectorDataC(i,6)/CP.MechEff)*SectorDataC(i,4)*2;  
       end
       
       %SectorDataC(i,7) = 0;
@@ -333,4 +357,16 @@ end
   %figure
   %plot(SectorDataC(:,3),ForceDataC(:,3)*CP.Rtire, SectorDataC(:,3), ForceDataC(:,4)*CP.Rtire)
    
+%     figure
+%     plot(SectorDataA(:,3), SectorDataA(:,1),'r')
+%     hold on
+%     plot(SectorDataB(:,3), SectorDataB(:,1),'b')
+%     plot(SectorDataC(:,3), SectorDataC(:,1),'g')
+%     title("Velocity Profile")
+%     legend("Acceleration Profile","Braking Profile","Combined Profile")
+%     xlabel("Distance (m)")
+%     xlim([0 850])
+%     ylabel("Velocity (m/s)")
+%     hold off
+%   
 end

@@ -1,6 +1,7 @@
 function  [AccelSimResults, AccelPowerResults, TotalT] = AccelSim(CP,AP)
 
-
+    MotorLimit_500V = load("MotorLimit_500V.mat");
+    MotorLimit_500V = MotorLimit_500V.MotorLimit_500V;
 
       rho = 1.225;
      [CfdragT, CfdownT] = AeroMap(AP);
@@ -8,7 +9,7 @@ function  [AccelSimResults, AccelPowerResults, TotalT] = AccelSim(CP,AP)
      Fdown1 = 1/2*rho*CfdownT; %*Down_Var;
 
     
-     dt = 0.01;
+     dt = 0.001;
      Distance_Max = 75; %m
     
      i = 1;
@@ -48,21 +49,43 @@ function  [AccelSimResults, AccelPowerResults, TotalT] = AccelSim(CP,AP)
          Ffz(i) = B(1,3);
          Frz(i) = B(2,3);
          Ffx(i) = CP.TireCf*Ffz(i); 
+         %Ffx(i) = 0;
          Frx(i) = CP.TireCf*Frz(i);
          
          TracLimFfx(i) = Ffx(i);
          TracLimFrx(i) = Frx(i);
          
-         OutputPower(i) = (Ffx(i)+Frx(i))*vel(i);
          
-         if OutputPower(i) > CP.Pmax*CP.MechEff/2
-             
-             d = (CP.Pmax*CP.MechEff/2)/OutputPower(i);
-             
-             Ffx(i) = Ffx(i)*d;
-             Frx(i) = Frx(i)*d;
-               
-         end
+         
+            WheelRpm = vel(i)*60/(2*pi*CP.Rtire);
+            MotorRpm = WheelRpm*CP.Nratio;
+            MaxWheelTorque = interp1(MotorLimit_500V(:,1), MotorLimit_500V(:,2),MotorRpm,'nearest')*CP.Nratio;
+            
+            if Ffx(i)*CP.Rtire > MaxWheelTorque
+                Ffx(i) = MaxWheelTorque/CP.Rtire; 
+            end
+            
+            if Frx(i)*CP.Rtire > MaxWheelTorque
+                Frx(i) = MaxWheelTorque/CP.Rtire; 
+            end
+            
+            OutputPower(i) = (Ffx(i)+Frx(i))*vel(i);
+            
+            if OutputPower(i) > CP.Pmax*CP.MechEff/2
+                 d = (CP.Pmax*CP.MechEff)/(2*OutputPower(i));
+                
+                Ffx(i) = Ffx(i)*d;
+                Frx(i) = Frx(i)*d;
+            end
+         
+%          if OutputPower(i) > CP.Pmax*CP.MechEff/2
+%              
+%              d = (CP.Pmax*CP.MechEff/2)/OutputPower(i);
+%              
+%              Ffx(i) = Ffx(i)*d;
+%              Frx(i) = Frx(i)*d;
+%                
+%          end
          
          Fdrag(i) = Fdrag1*vel(i)^2;
          
