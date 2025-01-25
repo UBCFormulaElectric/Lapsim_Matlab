@@ -299,7 +299,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             
         else
         
-            % Full breaking
+            % Full braking
             Ffy(i) = FfyReq;
             Fry(i) = FryReq;
             
