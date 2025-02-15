@@ -1,35 +1,67 @@
 function  [AccelSimResults, AccelPowerResults, TotalT] = AccelSim(CP,AP)
+    %  --------------------------------------------------------------------  %
+    %  AccelSimResults an array containing the results from the
+    %  acceleration simulation: 
+    % 
+    %       Column 1: FzFront (N)
+    %       Column 2: FzRear (N)
+    %       Column 3: FxFront (N)
+    %       Column 4: FxRear (N)
+    %       Column 5: frontTractionLimit (N/m^2)
+    %       Column 6: rearTractionLimit (N/m^2)
+    %       Column 7: frontTireTorque (Nm)
+    %       Column 8: rearTireTorque (Nm)
+    %       Column 9: frontPower (W)
+    %       Column 10: rearPower (W)
+    %       Column 11: velocity (m/s)
+    %       Column 12: position (m)
+    %       Column 13: time (seconds)
+    % 
+    %  AccelPowerResults, Acceleration Power data Matrix
+    %       Column 1: maxFrontPower
+    %       Column 2: maxRearPower
 
+    %  TotalT: 
+    %       Theoretical total time for car to travel the max distance 
+    %       internally defined, based on acceleration data
+    % 
+    %  --------------------------------------------------------------------  %
+
+
+    
+    %  --------------------------------------------------------------------  %
+    %  Load Car and Track parameters
+    %  --------------------------------------------------------------------  %
     MotorLimit_500V = load("MotorLimit_500V.mat");
     MotorLimit_500V = MotorLimit_500V.MotorLimit_500V;
 
-      rho = 1.225;
-     [CfdragT, CfdownT] = AeroMap(AP);
-     Fdrag1 = 1/2*rho*CfdragT; %*Drag_Var;   %Calculates Fdrag prime which is simply the collection of constants such that Drag Force = Fdrag1*Velocity^2 
-     Fdown1 = 1/2*rho*CfdownT; %*Down_Var;
+    rho = 1.225;
+    [CfdragT, CfdownT] = AeroMap(AP);
+    Fdrag1 = 1/2*rho*CfdragT; %*Drag_Var;   %Calculates Fdrag prime which is simply the collection of constants such that Drag Force = Fdrag1*Velocity^2 
+    Fdown1 = 1/2*rho*CfdownT; %*Down_Var;
 
     
-     dt = 0.001;
-     Distance_Max = 75; %m
+    dt = 0.001;
+    Distance_Max = 75; %m
     
-     i = 1;
-     t(i) = 0;
-     Ffz(i) = 0;
-     Frz(i) = 0;
-     Ffx(i) = 0;
-     Frx(i) = 0;
-     Tr(i) = 0;
-     Tf(i) = 0;
+    i = 1;
+    t(i) = 0;
+    Ffz(i) = 0;
+    Frz(i) = 0;
+    Ffx(i) = 0;
+    Frx(i) = 0;
+    Tr(i) = 0;
+    Tf(i) = 0;
      
      
-     Fdrag(i) = 0;
-     Fdown(i) = 0;
-     pos(i) = 0;
-     vel(i) = 0;
-     accel(i) = 0;
+    Fdrag(i) = 0;
+    Fdown(i) = 0;
+    pos(i) = 0;
+    vel(i) = 0;
+    accel(i) = 0;
      
-     TracLimFfx(i) = 0;   %Traction limit front wheel
-     TracLimFrx(i) = 0;   %Traction limit rear wheel
+    TracLimFfx(i) = 0;   %Traction limit front wheel
+    TracLimFrx(i) = 0;   %Traction limit rear wheel
    
 
     
@@ -41,7 +73,7 @@ function  [AccelSimResults, AccelPowerResults, TotalT] = AccelSim(CP,AP)
 %          Frx(i) = CP.TireCf*Frz(i)
 
      
-      while pos(i) < Distance_Max
+     while pos(i) < Distance_Max
           
          A = [ 2 2 CP.CarMass*9.81+vel(i)^2*Fdown1; (2*(CP.WheelBase-CP.CG(1))+2*CP.TireCf*CP.CG(2)) (-2*CP.CG(1)+2*CP.TireCf*CP.CG(2)) -Fdown1*vel(i)^2*(CP.CG(1)-AP.CP(1)) - Fdrag1*vel(i)^2*(AP.CP(2) - CP.CG(2))];
          B = rref(A);
