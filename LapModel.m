@@ -1,4 +1,4 @@
-function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,AP,CourseName)
+function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed, slipAf, slipRf, yaw] = LapModel(CP,AP,CourseName)
 
 % CourseData(:,n) is an array containing information about the track data
 %   Firt Column : X - Coordinates of track
@@ -44,6 +44,9 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     Fdrag1 = 1/2*rho*CfdragT;   %Calculates Fdrag prime which is simply the collection of constants such that Drag Force = Fdrag1*Velocity^2
     Fdown1 = 1/2*rho*CfdownT;
 
+    pac_fx = [ -15.75854662   1.43389415   3.343542286  0.91617855  ];
+    pac_fy = [   0.170613402  1.544452682  2.924301138  0.524592595 ];
+
     %  --------------------------------------------------------------------  %
     %  Sets initial conditions for acceleration portion of the forwards- 
     %  backwards method. Creates the vectors for the velocity, acceleration,
@@ -61,6 +64,13 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     Ffz   = zeros(1,length(CrseData)-1);
     Frz   = zeros(1,length(CrseData)-1);
     Fdrag = zeros(1,length(CrseData)-1);
+
+    slipAf = zeros(1,length(CrseData)-1);
+    slipAr = zeros(1,length(CrseData)-1);
+    slipRf = zeros(1,length(CrseData)-1);
+    slipRr = zeros(1,length(CrseData)-1);
+
+    yaw = zeros(1,length(CrseData)-1);
 
     % Calculates initial front and rear wheel forces in the z direction
     % Matrix of the force and moment balance on the XZ plane, RREF to solve for the z forces
@@ -90,15 +100,54 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         a = [1 1 CP.CarMass*velA(i-1)^2/CrseData(i,3); -(CP.WheelBase-CP.CG(1)) CP.CG(1) 0];  % Calculates required lateral tire force for incoming velocity velA(i-1)
         b = rref(a);
         
-        % Required front and frear forces
+        % Required front and rear forces
         FfyReq = b(1,3);
         FryReq = b(2,3);
-        
+
+        % Calculating slip angle (some from chat, need to verify)
+        vx = velA(i-1);
+        vy = 0; % assume 0 lateral accel
+        R = CrseData(i,3);
+        yaw_rate = vx / R;
+        yaw(i-1) = yaw_rate;
+
+        % calculate lateral at each axle
+        al = CP.WheelBase-CP.CG(1);
+        bl = CP.CG(1); %a and b are the distances from the center of mass (CoM) to the front and rear axles, respectively.
+        vyf = vy + al*yaw_rate;
+        vyr = vy - bl*yaw_rate;
+
+        slipAf(i-1) = atan(vyf/abs(vx));
+        slipAr(i-1) = atan(vyr/abs(vx));
+
+        if abs(vx) < 0.0001
+            slipAf(i-1) = 0;
+            slipAr(i-1) = 0;
+        end
+
+        angVel = vx / CP.Rtire;
+        Re = vx / angVel;
+
+        slipRf(i-1) = ((angVel * Re) / (vx * cos(slipAf(i-1)))) - 1;
+        slipRr(i-1) = ((angVel * Re) / (vx * cos(slipAr(i-1)))) - 1;
+
+        if abs(vx) < 0.0001
+            slipRf(i-1) = 100000;
+            slipRr(i-1) = 100000;
+        end
+
+        Ffyi = Pacejka4(Ffz(i-1),slipAf(i-1),pac_fy);
+        Fryi = Pacejka4(Frz(i-1),slipAr(i-1),pac_fy);
+        Ffxi = Pacejka4(Ffz(i-1),slipRf(i-1),pac_fx);
+        Frxi = Pacejka4(Frz(i-1),slipRr(i-1),pac_fx);
+
         % Calculates theoretical max velocity of this segment assuming front limited
         VmaxF = sqrt(CP.TireCf*Ffz(i-1)*CP.WheelBase/CP.CG(1)*CrseData(i,3)/CP.CarMass); 
+        %VmaxF = sqrt(Ffyi*CrseData(i,3)/CP.CarMass); 
 
         % Calculates theoreticl max velocity of this segment assuming rear limited
         VmaxR = sqrt(CP.TireCf*Frz(i-1)*(1+CP.CG(1)/(CP.WheelBase-CP.CG(1)))*CrseData(i,3)/CP.CarMass); 
+        %VmaxR = sqrt(Fryi*CrseData(i,3)/CP.CarMass); 
         
         % If the velocity on the previous iteration is higher than the theoretical velocity this higher we 
         % do not need to accelerate, we can coast.
@@ -108,11 +157,13 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             if VmaxF < VmaxR
                 velA(i) = VmaxF;
                 Ffy(i) = Ffz(i-1)*CP.TireCf;
+                %Ffy(i) = Ffyi;
                 Fry(i) = Ffy(i)*(CP.WheelBase - CP.CG(1))/CP.CG(1);
             % If rear limited, Ffy is derived from Fry
             else
                 velA(i) = VmaxR;
                 Fry(i) = Frz(i-1)*CP.TireCf;
+                %Fry(i) = Fryi;
                 Ffy(i) = Fry(i)*CP.CG(1)/(CP.WheelBase - CP.CG(1));
             end
                 
@@ -149,16 +200,18 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             Ffx(i) = 0; %1/2*Fdrag1*velA(i-1)^2;  
             Frx(i) = 0; %1/2*Fdrag1*velA(i-1)^2;
 
-        % If the other conditions are not met we can accelerate
+        % If the other conditions are not met, we can accelerate
         else
 
             % Set lateral forces to the required ones
             Ffy(i) = FfyReq;
             Fry(i) = FryReq;
             
-            % Longitudinal acceleration is based on tire parameters
+            % Tractional acceleration is based on tire parameters
             Ffx(i) = sqrt((CP.TireCf*Ffz(i-1))^2-Ffy(i)^2);
             Frx(i) = sqrt((CP.TireCf*Frz(i-1))^2-Fry(i)^2);
+            %Ffx(i) = sqrt(Ffxi^2-Ffy(i)^2); % Ffxi or Ffyi
+            %Frx(i) = sqrt(Frxi^2-Fry(i)^2);
             
             % Power = Force * Velocity
             OutputPower = (Ffx(i)+Frx(i))*velA(i-1);
@@ -203,7 +256,10 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         Frz(i) = b(2,3);
         Fdrag(i) = Fdrag1*velA(i-1)^2;
         
-    end  
+    end 
+
+    slipAf = [slipAf.', slipAr.'];
+    slipRf = [slipRf.', slipRr.'];
 
     %  --------------------------------------------------------------------  %
     %  Post-loop data formatting
@@ -275,11 +331,49 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         FfyReq = b(1,3);
         FryReq = b(2,3);
             
+        % Calculating slip angle (some from chat, need to verify)
+        vx = velB(i-1);
+        vy = 0; % assume 0 lateral accel
+        R = CrseData(i,3);
+        yaw_rate = vx / R;
+
+        % calculate lateral at each axle
+        al = CP.WheelBase-CP.CG(1);
+        bl = CP.CG(1); %a and b are the distances from the center of mass (CoM) to the front and rear axles, respectively.
+        vyf = vy + al*yaw_rate;
+        vyr = vy - bl*yaw_rate;
+
+        slipAf(i-1) = atan(vyf/abs(vx));
+        slipAr(i-1) = atan(vyr/abs(vx));
+
+        if abs(vx) < 0.0001 || yaw_rate < 0.0001
+            slipAf(i-1) = 0;
+            slipAr(i-1) = 0;
+        end
+
+        angVel = vx / CP.Rtire;
+        Re = vx / angVel;
+
+        slipRf(i-1) = ((angVel * Re) / (vx * cos(slipAf(i-1)))) - 1;
+        slipRr(i-1) = ((angVel * Re) / (vx * cos(slipAr(i-1)))) - 1;
+
+        if abs(vx) < 0.0001
+            slipRf(i-1) = 100000;
+            slipRr(i-1) = 100000;
+        end
+
+        Ffyi = Pacejka4(Ffz(i-1),slipAf(i-1),pac_fy);
+        Fryi = Pacejka4(Frz(i-1),slipAr(i-1),pac_fy);
+        Ffxi = Pacejka4(Ffz(i-1),slipRf(i-1),pac_fx);
+        Frxi = Pacejka4(Frz(i-1),slipRr(i-1),pac_fx);
+
         % Calculates theoretical max velocity of this segment assuming front limited
         VmaxF = sqrt(CP.TireCf*Ffz(i-1)*CP.WheelBase/CP.CG(1)*CrseData(i,3)/CP.CarMass);
+        %VmaxF = sqrt(Ffyi*CrseData(i,3)/CP.CarMass);
 
         % Calculates theoreticl max velocity of this segment assuming rear limited
         VmaxR = sqrt(CP.TireCf*Frz(i-1)*(1+CP.CG(1)/(CP.WheelBase-CP.CG(1)))*CrseData(i,3)/CP.CarMass);
+        %VmaxR = sqrt(Fryi*CrseData(i,3)/CP.CarMass);
             
         % If the previous iteration velocity (time step in the future) is higher then we want to coast. 
         % Otherwise, we want to brake.
@@ -289,11 +383,13 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             if VmaxF < VmaxR
                 velB(i) = VmaxF;
                 Ffy(i) = Ffz(i-1)*CP.TireCf;
+                %Ffy(i) = Ffyi;
                 Fry(i) = Ffy(i)*(CP.WheelBase - CP.CG(1))/CP.CG(1);
             % If rear limited, Ffy is derived from Fry
             else
                 velB(i) = VmaxR;
                 Fry(i) = Frz(i-1)*CP.TireCf;
+                %Fry(i) = Fryi;
                 Ffy(i) = Fry(i)*CP.CG(1)/(CP.WheelBase - CP.CG(1));
             end
             
@@ -313,6 +409,8 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             % Longitudinal acceleration is based on tire parameters
             Ffx(i) = sqrt((CP.TireCf*Ffz(i-1))^2-Ffy(i)^2);
             Frx(i) = sqrt((CP.TireCf*Frz(i-1))^2-Fry(i)^2);
+            %Ffx(i) = sqrt(Ffxi^2-Ffy(i)^2);
+            %Frx(i) = sqrt(Frxi^2-Fry(i)^2);
             
             % Power = Force * Velocity
             %OutputPower = (Ffx(i)+Frx(i))*velB(i-1);
@@ -452,11 +550,15 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         % Front Energy = (Front Power / MechEff) * dt * 2 
         if SectorDataC(i,5) > 0
             SectorDataC(i,7) = (SectorDataC(i,5)/CP.MechEff)*SectorDataC(i,4)*2;
+        else
+            SectorDataC(i,7) = 0;
         end
             
         % Rear Energy = (Rear Power / MechEff) * dt * 2 
         if SectorDataC(i,6) > 0
             SectorDataC(i,8) = (SectorDataC(i,6)/CP.MechEff)*SectorDataC(i,4)*2;  
+        else
+            SectorDataC(i,8) = 0;
         end
         
     end
