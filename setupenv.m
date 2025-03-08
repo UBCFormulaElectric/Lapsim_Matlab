@@ -1,3 +1,5 @@
+clear; clc;
+
 CP.TireCf = 1.2;
 CP.CarMass =  300;
 CP.Rtire =  0.2286;
@@ -22,5 +24,11 @@ AP.CfdownRW =  3;
 AP.AfRW =  0.8;
 AP.CP =  [0.7, 0.4];
 
-[SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed, slipA, slipR, yaw] = LapModel(CP,AP,TrackSave);
-yaw = yaw.';
+Course = load('C:\Users\alexv\OneDrive\Documents\Formula Electric\Lapsim_Matlab\Course Data\fsae2024autocross4000divisions.mat');
+CourseData = Course.TrackSave;
+[SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed, slipA, slipR] = LapModel(CP,AP,CourseData);
+
+plot(SectorDataC(:,3),slipA(:,1),'r');
+hold on;
+plot(SectorDataC(:,3),slipR(:,1),'b');
+ylim([-10,10]);
