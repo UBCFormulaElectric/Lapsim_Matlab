@@ -1,4 +1,4 @@
-function  [AccelSimResults, AccelPowerResults, TotalT] = lapModelAccelSim(CP,AP, dt, Distance_Max)
+function  [AccelSimResults, AccelPowerResults, TotalT] = lapModelAccelSim(CP,AP)
     %  --------------------------------------------------------------------  %
     %  AccelSimResults an array containing the results from the
     %  acceleration simulation: 
@@ -34,8 +34,8 @@ function  [AccelSimResults, AccelPowerResults, TotalT] = lapModelAccelSim(CP,AP,
 
 
 
-   NumSegments = dt;
-   lengthSegment = Distance_Max/(NumSegments-1); 
+   NumSegments = 1000;
+   lengthSegment = 75/(NumSegments-1); 
 
 
     CourseData(1,1) = 0; 
