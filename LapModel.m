@@ -1,4 +1,4 @@
-function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,AP,CourseName)
+function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,AP,CourseName,ModelOptions)
 
 % CourseData(:,n) is an array containing information about the track data
 %   Firt Column : X - Coordinates of track
@@ -41,7 +41,11 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     MotorLimitSpeed = 19900*(2*pi*CP.Rtire)/(60*CP.Nratio);
     %MotorLimitSpeed = 30; %Based on Motor Curves?
 
-    frontWheelDrive = true;
+    if ModelOptions.four_wheel_drive == 1
+        frontWheelDrive = true;
+    else
+        frontWheelDrive = false;
+    end
 
     [CfdragT, CfdownT] = AeroMap(AP); %Call to aeromap function which combines the effects of drag and downforce from each individual element 
 
@@ -60,8 +64,8 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     v_thresh = 0.1;
 
     % Start/Stop Conditions
-    vStart = 20;
-    vEnd = -1; %neg 1 means dont brake
+    vStart = ModelOptions.start_velocity;
+    vEnd   = ModelOptions.stop_velocity; %neg 1 means dont brake
 
     %  --------------------------------------------------------------------  %
     %  Sets initial conditions for acceleration portion of the forwards- 
