@@ -193,15 +193,19 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             Frx(i) = rfe * FrxMax;
 
             % Power = Force * Velocity
-            OutputPower = (Ffx(i)+Frx(i))*velXA(i-1);
+            if frontWheelDrive
+                OutputPower = (Ffx(i)+Frx(i))*velXA(i-1);
+            else
+                OutputPower = (Frx(i))*velXA(i-1);
+            end
 
             % 4 Wheel Drive Code
             WheelRpm = velXA(i-1)*60/(2*pi*CP.Rtire);
             MotorRpm = WheelRpm*CP.Nratio;
             MaxWheelTorque = interp1(MotorLimit_500V(:,1), MotorLimit_500V(:,2),MotorRpm,'nearest')*CP.Nratio;
-            % if front wheel drive with big motors that explains speed **
-            % check
                 
+            % Available Motor Torque Limiting
+            % Front Wheel Drive
             if frontWheelDrive
                 if Ffx(i)*CP.Rtire > MaxWheelTorque*2
                     Ffx(i) = MaxWheelTorque*2/CP.Rtire; 
@@ -214,7 +218,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
                 Frx(i) = MaxWheelTorque*2/CP.Rtire; 
             end
                 
-            % If Power Limitted
+            % Power Limiting
             if OutputPower > CP.Pmax*CP.MechEff
                 d = (CP.Pmax*CP.MechEff)/(OutputPower);
                     
@@ -238,7 +242,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         % Calculates initial front and rear wheel forces in the z direction
         % Matrix of the force and moment balance on the XZ plane, RREF to solve for the z forces
         a = [1 1 CP.CarMass*9.81+Fdown1*velXA(i)^2; 
-            (CP.WheelBase - CP.CG(1)) -CP.CG(1) (Frx(i)+Ffx(i))*CP.CG(2)+Fdown1*velXA(i)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velXA(i)^2*(AP.CP(2) - CP.CG(2))];
+            -(CP.WheelBase - CP.CG(1)) CP.CG(1) (Frx(i)+Ffx(i))*CP.CG(2)+Fdown1*velXA(i)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velXA(i)^2*(AP.CP(2) - CP.CG(2))];
         b = rref(a);
             
         Ffz(i) = b(1,3);
@@ -305,7 +309,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     % Calculates initial front and rear wheel forces in the z direction
     % Matrix of the force and moment balance on the XZ plane, RREF to solve for the z forces
     a = [1 1 CP.CarMass*9.81+Fdown1*velXB(1)^2; 
-        -(CP.WheelBase - CP.CG(1)) CP.CG(1) (Frx(1)+Ffx(1))*CP.CG(2)+Fdown1*velXB(1)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velXB(1)^2*(AP.CP(2) - CP.CG(2))];
+        -(CP.WheelBase - CP.CG(1)) CP.CG(1) (Frx(1)+Ffx(1))*CP.CG(2)+Fdown1*velXB(1)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velXB(1)^2*(AP.CP(2) - CP.CG(2))]; % TODO these equations are inconsistent
     b = rref(a);
 
     Ffz(1) = b(1,3);
@@ -344,7 +348,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         FfxMax = Pacejka4(-Ffz(i-1),slipRmax,pac_fx);
         FrxMax = Pacejka4(-Frz(i-1),slipRmax,pac_fx);
 
-        if abs(velXB(i-1)) < v_thresh %check for braking
+        if abs(velXB(i-1)) < v_thresh
             FfyMax = CP.TireCf*Ffz(i-1);
             FryMax = CP.TireCf*Frz(i-1);
             FfxMax = CP.TireCf*Ffz(i-1);
@@ -411,7 +415,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         % Calculates initial front and rear wheel forces in the z direction
         % Matrix of the force and moment balance on the XZ plane, RREF to solve for the z forces
         a = [1 1 CP.CarMass*9.81+Fdown1*velXB(i)^2; 
-            +(CP.WheelBase - CP.CG(1)) -CP.CG(1) -(Frx(i)+Ffx(i))*CP.CG(2)+Fdown1*velXB(i)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velXB(i)^2*(AP.CP(2) - CP.CG(2))];
+            -(CP.WheelBase - CP.CG(1)) CP.CG(1) (Frx(i)+Ffx(i))*CP.CG(2)+Fdown1*velXB(i)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velXB(i)^2*(AP.CP(2) - CP.CG(2))];
         b = rref(a);
         
         Ffz(i) = b(1,3);
@@ -469,10 +473,10 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     %  time step. All in all this gives us our forwards-backwards method.
     %  --------------------------------------------------------------------  %
     for i = 1:min(length(SectorDataB), length(SectorDataA))
-    
+
         % If the Acceleration curve has a higher velocity use those data
         % points, otherwise use the Braking curve
-        if SectorDataA(i,1) < SectorDataB(i,1)
+        if SectorDataB(i,1) > SectorDataA(i,1)
             SectorDataC(i,1) = SectorDataA(i,1); % Velocity
             SectorDataC(i,2) = SectorDataA(i,2); % Acceleration
             SectorDataC(i,3) = SectorDataA(i,3); % Position
