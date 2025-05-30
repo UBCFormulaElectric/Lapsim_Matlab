@@ -192,13 +192,6 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             Ffx(i) = ffe * FfxMax;
             Frx(i) = rfe * FrxMax;
 
-            % Power = Force * Velocity
-            if frontWheelDrive
-                OutputPower = (Ffx(i)+Frx(i))*velXA(i-1);
-            else
-                OutputPower = (Frx(i))*velXA(i-1);
-            end
-
             % 4 Wheel Drive Code
             WheelRpm = velXA(i-1)*60/(2*pi*CP.Rtire);
             MotorRpm = WheelRpm*CP.Nratio;
@@ -217,6 +210,9 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             if Frx(i)*CP.Rtire > MaxWheelTorque*2
                 Frx(i) = MaxWheelTorque*2/CP.Rtire; 
             end
+
+            % Power = Force * Velocity
+            OutputPower = (Ffx(i)+Frx(i))*velXA(i-1);
                 
             % Power Limiting
             if OutputPower > CP.Pmax*CP.MechEff
@@ -413,13 +409,6 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             Ffx(i) = ffe * FfxMax;
             Frx(i) = rfe * FrxMax;
 
-             % Power = Force * Velocity
-            if frontWheelDrive
-                OutputPower = (Ffx(i)+Frx(i))*velXB(i-1);
-            else
-                OutputPower = (Frx(i))*velXB(i-1);
-            end
-
             % 4 Wheel Drive Code
             WheelRpm = velXB(i-1)*60/(2*pi*CP.Rtire);
             MotorRpm = WheelRpm*CP.Nratio;
@@ -439,6 +428,9 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
                 Frx(i) = MaxWheelTorque*2/CP.Rtire; 
             end
                 
+            % Power = Force * Velocity
+            OutputPower = (Ffx(i)+Frx(i))*velXB(i-1);
+
             % Power Limiting
             if OutputPower > CP.Pmax*CP.MechEff
                 d = (CP.Pmax*CP.MechEff)/(OutputPower);
@@ -471,9 +463,6 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         Fdrag(i) = Fdrag1*velXB(i)^2;
 
     end
-
-
-
 
     %  --------------------------------------------------------------------  %
     %  Post-loop data formatting
