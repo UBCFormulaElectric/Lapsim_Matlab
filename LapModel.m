@@ -386,7 +386,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             
             % Set velocity of current segment to theoretical max
             velXB(i) = MotorLimitSpeed;
-            accelXA(i) = 0; %-Fdrag1*velA(i-1)^2/CP.CarMass; 
+            accelXB(i) = 0; %-Fdrag1*velA(i-1)^2/CP.CarMass; 
 
             % Set lateral forces to the required ones
             Ffy(i) = FfyReq;

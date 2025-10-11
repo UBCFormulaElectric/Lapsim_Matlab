@@ -8,5 +8,9 @@ function [AccelerationScore] = AccelerationCompScoreCalc(AccelerationTime)
         AccelerationScore = 95.5* (Tmax/AccelerationTime - 1)/(Tmax/Tmin - 1) + 4.5; 
     end
 
+    if(AccelerationScore > 100)
+        AccelerationScore = 100;
+    end
+
 end
 
