@@ -1,14 +1,14 @@
 function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,AP,CourseName,ModelOptions)
 
 % CourseData(:,n) is an array containing information about the track data
-%   Firt Column : X - Coordinates of track
-%   Second Column : Y - Coordinates of track
-%   Third Column : Instantateous radius of the track at that point
-%   Fourth Column : Legnth of sector, of the i to i+1 data point
-%   Fifth Column : Center of Circle Column : X
-%   Sixth Column : Center of Cricle Column : Y
-%   Seventh Column : Direction Vector  Column : X
-%   Eighth Column : Direction Vector Column : Y
+%   Firt Column : X - Coordinates of track.
+%   Second Column : Y - Coordinates of track.
+%   Third Column : Instantateous radius of the track at that point.
+%   Fourth Column : Legnth of sector, of the i to i+1 data point.
+%   Fifth Column : Center of Circle Column : X.
+%   Sixth Column : Center of Cricle Column : Y.
+%   Seventh Column : Direction Vector  Column : X.
+%   Eighth Column : Direction Vector Column : Y.
 %   Ninth Column : Angle between Sector(i) and (i-1)
 %
 % SectorData(:,n) is an array containing information about the entry and exit speeds of each ector
