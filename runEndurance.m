@@ -1,4 +1,4 @@
-function [SectorDataC_EN, ForceDataC_EN, TotalT_EN, LapLength_EN, EnergyUsed_Lap, EnergyUsed_EN, ENScalar, CP, AP] = runEndurance(CP, AP, CourseData)
+function [SectorDataC_EN, ForceDataC_EN, TotalT_EN, LapLength_EN, EnergyUsed_Lap, EnergyUsed_EN, ENScalar, CP, AP] = runEndurance(CP, AP, CourseData,options)
 
     %  --------------------------------------------------------------------  %
     % Input Parameter(s):
@@ -49,7 +49,7 @@ function [SectorDataC_EN, ForceDataC_EN, TotalT_EN, LapLength_EN, EnergyUsed_Lap
     %  user provided intial conditions
     %  --------------------------------------------------------------------  %
     
-    [SectorDataC_EN, ForceDataC_EN, TotalT_EN, LapLength_EN, EnergyUsed_Lap] = LapModel(CP,AP,CourseData);
+    [SectorDataC_EN, ForceDataC_EN, TotalT_EN, LapLength_EN, EnergyUsed_Lap] = LapModel(CP,AP,CourseData,options);
 
 
     %  --------------------------------------------------------------------  %
@@ -100,7 +100,7 @@ function [SectorDataC_EN, ForceDataC_EN, TotalT_EN, LapLength_EN, EnergyUsed_Lap
         CP.Pmax = CP.Pmax*PowerScaleFactor;
         
         %Using LapModel to find energy consumption per lap and the new Pmax
-        [SectorDataC_EN, ForceDataC_EN, TotalT_EN, LapLength_EN , EnergyUsed_Lap] = LapModel(CP,AP,CourseData);
+        [SectorDataC_EN, ForceDataC_EN, TotalT_EN, LapLength_EN , EnergyUsed_Lap] = LapModel(CP,AP,CourseData,options);
                 
 
         %Calculates total energy consumption based on per-lap consumption

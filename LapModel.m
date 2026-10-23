@@ -1,4 +1,4 @@
-function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,AP,CourseName)
+function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,AP,CourseName,ModelOptions)
 
 % CourseData(:,n) is an array containing information about the track data
 %   Firt Column : X - Coordinates of track
@@ -33,25 +33,50 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     %  --------------------------------------------------------------------  %
     %  Load Car and Track parameters
     %  --------------------------------------------------------------------  %
+    CrseData = CourseName;
+
     MotorLimit_500V = load("MotorLimit_500V.mat");
     MotorLimit_500V = MotorLimit_500V.MotorLimit_500V;
-    CrseData = CourseName;
-    rho = 1.225;
-    [CfdragT, CfdownT] = AeroMap(AP); %Call to aeromap function which combines the effects of drag and downforce from each individual element
-
+    
     MotorLimitSpeed = 19900*(2*pi*CP.Rtire)/(60*CP.Nratio);
+    %MotorLimitSpeed = 30; %Based on Motor Curves?
+
+    if ModelOptions.four_wheel_drive == 1
+        frontWheelDrive = true;
+    else
+        frontWheelDrive = false;
+    end
+
+    [CfdragT, CfdownT] = AeroMap(AP); %Call to aeromap function which combines the effects of drag and downforce from each individual element 
+
+    rho = 1.225;
 
     Fdrag1 = 1/2*rho*CfdragT;   %Calculates Fdrag prime which is simply the collection of constants such that Drag Force = Fdrag1*Velocity^2
     Fdown1 = 1/2*rho*CfdownT;
+
+    % Pacejka parameters
+    pac_fx = [ -15.75854662   1.43389415   3.343542286  0.91617855  ];
+    pac_fy = [   0.170613402  1.544452682  2.924301138  0.524592595 ];
+
+    slipAmax = 9.48021;
+    slipRmax = 0.123296;
+
+    v_thresh = 0.1;
+
+    % Start/Stop Conditions
+    vStart = ModelOptions.start_velocity;
+    vEnd   = ModelOptions.stop_velocity; %neg 1 means dont brake
 
     %  --------------------------------------------------------------------  %
     %  Sets initial conditions for acceleration portion of the forwards- 
     %  backwards method. Creates the vectors for the velocity, acceleration,
     %  position, and front and rear longitudinal forces.
     %  --------------------------------------------------------------------  %
-    posA   = zeros(1,length(CrseData)-1);
-    velA   = zeros(1,length(CrseData)-1);
-    accelA = zeros(1,length(CrseData)-1);
+    posA    = zeros(1,length(CrseData)-1);
+    velXA   = zeros(1,length(CrseData)-1);
+    velYA   = zeros(1,length(CrseData)-1);
+    accelXA = zeros(1,length(CrseData)-1);
+    accelYA = zeros(1,length(CrseData)-1);
 
     % Initial front and rear wheel forces
     Ffx   = zeros(1,length(CrseData)-1);
@@ -62,10 +87,13 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     Frz   = zeros(1,length(CrseData)-1);
     Fdrag = zeros(1,length(CrseData)-1);
 
+    % Start conditions
+    velXA(1) = vStart;
+
     % Calculates initial front and rear wheel forces in the z direction
     % Matrix of the force and moment balance on the XZ plane, RREF to solve for the z forces
-    a = [1 1 CP.CarMass*9.81+Fdown1*velA(1)^2; 
-        -(CP.WheelBase - CP.CG(1)) CP.CG(1) (Frx(1)+Ffx(1))*CP.CG(2)+Fdown1*velA(1)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velA(1)^2*(AP.CP(2) - CP.CG(2))];
+    a = [1 1 CP.CarMass*9.81+Fdown1*velXA(1)^2; 
+        -(CP.WheelBase - CP.CG(1)) CP.CG(1) (Frx(1)+Ffx(1))*CP.CG(2) - Fdown1*velXA(1)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velXA(1)^2*(AP.CP(2) - CP.CG(2))];
     b = rref(a);
 
     Ffz(1) = b(1,3);
@@ -87,60 +115,59 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         
         % Using the same matrix RREF method we calculate the front and rear forces in the lateral direction
         % Instead, we use the force and moment balance on the XY plane
-        a = [1 1 CP.CarMass*velA(i-1)^2/CrseData(i,3); -(CP.WheelBase-CP.CG(1)) CP.CG(1) 0];  % Calculates required lateral tire force for incoming velocity velA(i-1)
+        a = [1 1 CP.CarMass*velXA(i-1)^2/CrseData(i,3); -(CP.WheelBase-CP.CG(1)) CP.CG(1) 0];  % Calculates required lateral tire force for incoming velocity velA(i-1)
         b = rref(a);
         
-        % Required front and frear forces
+        % Required front and rear forces
         FfyReq = b(1,3);
         FryReq = b(2,3);
-        
-        % Calculates theoretical max velocity of this segment assuming front limited
-        VmaxF = sqrt(CP.TireCf*Frz(i-1)*(1+CP.CG(1)/(CP.WheelBase-CP.CG(1)))*CrseData(i,3)/CP.CarMass); 
-        
 
-        % Calculates theoreticl max velocity of this segment assuming rear limited
-        VmaxR = sqrt(CP.TireCf*Ffz(i-1)*CP.WheelBase/CP.CG(1)*CrseData(i,3)/CP.CarMass); 
+        % Calculate max lateral and tractional Forces from the Tires
+        FfyMax = -Pacejka4(-Ffz(i-1),slipAmax,pac_fy);
+        FryMax = -Pacejka4(-Frz(i-1),slipAmax,pac_fy); %ffy and fry may not balance
+
+        FfxMax = Pacejka4(-Ffz(i-1),slipRmax,pac_fx);
+        FrxMax = Pacejka4(-Frz(i-1),slipRmax,pac_fx);
+
+        if abs(velXA(i-1)) < v_thresh
+            FfyMax = CP.TireCf*Ffz(i-1);
+            FryMax = CP.TireCf*Frz(i-1);
+            FfxMax = CP.TireCf*Ffz(i-1);
+            FrxMax = CP.TireCf*Frz(i-1);
+        end
+
+        % Calculates theoretical max velocity of this segment assuming 
+        VmaxF = sqrt(FfyMax*CP.WheelBase/CP.CG(1)*CrseData(i,3)/CP.CarMass); % front limited
+        VmaxR = sqrt(FryMax*(1+CP.CG(1)/(CP.WheelBase-CP.CG(1)))*CrseData(i,3)/CP.CarMass); % rear limited
         
         % If the velocity on the previous iteration is higher than the theoretical velocity this higher we 
-        % do not need to accelerate, we can coast.
-        if velA(i-1) > min([VmaxF VmaxR])
+        % do not need to accelerate, we can "coast".
+        if velXA(i-1) > min([VmaxF VmaxR])
   
             % If front limited, Fry is derived from Ffy
             if VmaxF < VmaxR
-                velA(i) = VmaxF;
-                Ffy(i) = Ffz(i-1)*CP.TireCf;
+                velXA(i) = VmaxF;
+                Ffy(i) = FfyMax;
                 Fry(i) = Ffy(i)*(CP.WheelBase - CP.CG(1))/CP.CG(1);
             % If rear limited, Ffy is derived from Fry
             else
-                velA(i) = VmaxR;
-                Fry(i) = Frz(i-1)*CP.TireCf;
+                velXA(i) = VmaxR;
+                Fry(i) = FryMax;
                 Ffy(i) = Fry(i)*CP.CG(1)/(CP.WheelBase - CP.CG(1));
             end
                 
-            accelA(i) = 0; %-Fdrag1*velA(i-1)^2/CP.CarMass; 
+            accelXA(i) = 0; %-Fdrag1*velA(i-1)^2/CP.CarMass; 
 
             Ffx(i) = 0; %1/2*Fdrag1*velA(i-1)^2;
             Frx(i) = 0; %1/2*Fdrag1*velA(i-1)^2; 
             %Ffx(i) = 0;
         
         % If the desired velocity is not possible from the motor, we need to cap our speed
-        elseif velA(i-1) > MotorLimitSpeed
+        elseif velXA(i-1) > MotorLimitSpeed
             
             % Set velocity of current segment to theoretical max
-            velA(i) = MotorLimitSpeed;
-            accelA(i) = 0; %-Fdrag1*velA(i-1)^2/CP.CarMass; 
-                
-            %if C == 1      % If front limited
-            %                 
-            %   Ffy(i) = Ffz(i-1)*CP.TireCf;
-            %   Fry(i) = Ffy(i)*(CP.WheelBase - CP.CG(1))/CP.CG(1);
-            %                 
-            %elseif C == 2   % If rear limited    
-            %                 
-            %   Fry(i) = Frz(i-1)*CP.TireCf;
-            %   Ffy(i) = Fry(i)*CP.CG(1)/(CP.WheelBase - CP.CG(1));
-            %                 
-            %end
+            velXA(i) = MotorLimitSpeed;
+            accelXA(i) = 0; %-Fdrag1*velA(i-1)^2/CP.CarMass; 
 
             % Set lateral forces to the required ones
             Ffy(i) = FfyReq;
@@ -150,33 +177,52 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             Ffx(i) = 0; %1/2*Fdrag1*velA(i-1)^2;  
             Frx(i) = 0; %1/2*Fdrag1*velA(i-1)^2;
 
-        % If the other conditions are not met we can accelerate
+        % If the other conditions are not met, we can accelerate
         else
 
             % Set lateral forces to the required ones
             Ffy(i) = FfyReq;
             Fry(i) = FryReq;
             
-            % Longitudinal acceleration is based on tire parameters
-            Ffx(i) = sqrt((CP.TireCf*Ffz(i-1))^2-Ffy(i)^2);
-            Frx(i) = sqrt((CP.TireCf*Frz(i-1))^2-Fry(i)^2);
-            
-            % Power = Force * Velocity
-            OutputPower = (Ffx(i)+Frx(i))*velA(i-1);
+            % Friction Ellipse Coefficients
+            ffe = sqrt(1 - ((FfyReq^2) / (FfyMax^2)));
+            rfe = sqrt(1 - ((FryReq^2) / (FryMax^2)));
+
+            if isnan(ffe); ffe = 1; end
+            if isnan(rfe); rfe = 1; end
+
+            % Tractional acceleration is based on tire model
+            Ffx(i) = ffe * FfxMax;
+            Frx(i) = rfe * FrxMax;
 
             % 4 Wheel Drive Code
-            WheelRpm = velA(i-1)*60/(2*pi*CP.Rtire);
+            WheelRpm = velXA(i-1)*60/(2*pi*CP.Rtire);
             MotorRpm = WheelRpm*CP.Nratio;
             MaxWheelTorque = interp1(MotorLimit_500V(:,1), MotorLimit_500V(:,2),MotorRpm,'nearest')*CP.Nratio;
                 
-            if Ffx(i)*CP.Rtire > MaxWheelTorque*2
-                Ffx(i) = MaxWheelTorque*2/CP.Rtire; 
+            % Available Motor Torque Limiting
+            % Front Wheel Drive
+            if frontWheelDrive
+                if Ffx(i)*CP.Rtire > MaxWheelTorque*2
+                    Ffx(i) = MaxWheelTorque*2/CP.Rtire; 
+                end
+            else
+                Ffx(i) = 0;
             end
                 
             if Frx(i)*CP.Rtire > MaxWheelTorque*2
                 Frx(i) = MaxWheelTorque*2/CP.Rtire; 
             end
+
+            % Power = Force * Velocity
+            if frontWheelDrive
+                OutputPower = (Ffx(i)+Frx(i))*velXA(i-1);
+            else
+                OutputPower = (Frx(i))*velXA(i-1);
+            end
+
                 
+            % Power Limiting
             if OutputPower > CP.Pmax*CP.MechEff
                 d = (CP.Pmax*CP.MechEff)/(OutputPower);
                     
@@ -185,8 +231,11 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             end
             
             % Longitudinal force balance to find the acceleration, classical kinematics to find the velocity
-            accelA(i) = (Ffx(i) + Frx(i) - Fdrag1*velA(i-1)^2)/CP.CarMass;
-            velA(i) = sqrt(velA(i-1)^2 + 2*accelA(i)*CrseData(i,4));  
+            accelXA(i) = (Ffx(i) + Frx(i) - Fdrag1*velXA(i-1)^2)/CP.CarMass;
+            accelYA(i) = (Ffy(i) + Fry(i)) / CP.CarMass;
+
+            velXA(i) = sqrt(velXA(i-1)^2 + 2*accelXA(i)*CrseData(i,4));
+            velYA(i) = sqrt(velYA(i-1)^2 + 2*accelYA(i)*CrseData(i,4));
                 
         end
 
@@ -196,19 +245,21 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         % (Same calculation as pre-loop.)
         % Calculates initial front and rear wheel forces in the z direction
         % Matrix of the force and moment balance on the XZ plane, RREF to solve for the z forces
-        a = [1 1 CP.CarMass*9.81+Fdown1*velA(i-1)^2; 
-            (CP.WheelBase - CP.CG(1)) -CP.CG(1) (Frx(i)+Ffx(i))*CP.CG(2)+Fdown1*velA(i-1)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velA(i-1)^2*(AP.CP(2) - CP.CG(2))];
+        a = [1 1 CP.CarMass*9.81+Fdown1*velXA(i)^2; 
+            -(CP.WheelBase - CP.CG(1)) CP.CG(1) (Frx(i)+Ffx(i))*CP.CG(2) - Fdown1*velXA(i)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velXA(i)^2*(AP.CP(2) - CP.CG(2))];
         b = rref(a);
             
         Ffz(i) = b(1,3);
         Frz(i) = b(2,3);
-        Fdrag(i) = Fdrag1*velA(i-1)^2;
+        Fdrag(i) = Fdrag1*velXA(i)^2;
         
-    end  
+    end 
 
     %  --------------------------------------------------------------------  %
     %  Post-loop data formatting
     %  --------------------------------------------------------------------  %
+    velXA(end) = velXA(end-1);
+    velYA(end) = velYA(end-1);
 
     % Format the force vectors into an (n x 7) matrix
     ForceDataA(:,1) = Ffz(:);
@@ -220,8 +271,8 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     ForceDataA(:,7) = Fdrag(:);
 
     % Format the kinematics vectors into an (n x 3) matrix
-    SectorDataA(:,1) = velA(:);
-    SectorDataA(:,2) = accelA(:);
+    SectorDataA(:,1) = velXA(:);
+    SectorDataA(:,2) = accelXA(:);
     SectorDataA(:,3) = posA(:);
 
     %  --------------------------------------------------------------------  %
@@ -230,25 +281,43 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     %  position, front and rear longitudinal forces, and front and rear 
     %  vertical forces based on the end result of the acceleration iteration.
     %  --------------------------------------------------------------------  %
-    posB   = zeros(1,length(CrseData)-1);
-    velB   = zeros(1,length(CrseData)-1);
-    accelB = zeros(1,length(CrseData)-1);
+    posB    = zeros(1,length(CrseData)-1);
+    velXB   = zeros(1,length(CrseData)-1);
+    velYB   = zeros(1,length(CrseData)-1);
+    accelXB = zeros(1,length(CrseData)-1);
+    accelYB = zeros(1,length(CrseData)-1);
 
-    posB(1)   = posA(end);
-    velB(1)   = velA(end);
-    accelB(1) = accelA(end);
+    posB(1)    = posA(end);
+    velXB(1)   = velXA(end);
+    velYB(1)   = velYA(end);
+    accelXB(1) = accelXA(end);
+    accelYB(1) = accelYA(end);
 
-    Ffx = zeros(1,length(CrseData)-1);
-    Frx = zeros(1,length(CrseData)-1);
-    Ffy = zeros(1,length(CrseData)-1);
-    Fry = zeros(1,length(CrseData)-1);
-    Ffz = zeros(1,length(CrseData)-1);
-    Frz = zeros(1,length(CrseData)-1);
+    Ffx = zeros(1,length(CrseData));
+    Frx = zeros(1,length(CrseData));
+    Ffy = zeros(1,length(CrseData));
+    Fry = zeros(1,length(CrseData));
+    Ffz = zeros(1,length(CrseData));
+    Frz = zeros(1,length(CrseData));
 
     Ffz(1) = Ffz(end);
     Frz(1) = Frz(end);
     Ffx(1) = Ffx(end);
     Frx(1) = Frx(end);
+
+    % End Conditions
+    if vEnd ~= -1
+        velXB(1) = vEnd;
+    end
+
+    % Calculates initial front and rear wheel forces in the z direction
+    % Matrix of the force and moment balance on the XZ plane, RREF to solve for the z forces
+    a = [1 1 CP.CarMass*9.81+Fdown1*velXB(1)^2; 
+        -(CP.WheelBase - CP.CG(1)) CP.CG(1) -(Frx(1)+Ffx(1))*CP.CG(2)-Fdown1*velXB(1)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velXB(1)^2*(AP.CP(2) - CP.CG(2))];
+    b = rref(a);
+
+    Ffz(1) = b(1,3);
+    Frz(1) = b(2,3);
 
     % Flips the course data so that we are iterating from the back of the track forwards
     CrseData = flip(CrseData);
@@ -261,104 +330,178 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     %  and use these to calculate the maximum speed for the front and rear.
     %
     %  We then find if the car needs to brake or coast After, we can 
-    %  recalcalate the z forces for the next iteration. 
+    %  recalculate the z forces for the next iteration. 
     % 
     %  We complete this process over the entire track.
     %  --------------------------------------------------------------------  %
     for i = 2:length(CrseData)   % Loops through all track points assuming braking forces
-        
+
         % Using the same matrix RREF method we calculate the front and rear forces in the lateral direction
         % Instead, we use the force and moment balance on the XY plane
-        a = [1 1 CP.CarMass*velB(i-1)^2/CrseData(i,3); -(CP.WheelBase-CP.CG(1)) CP.CG(1) 0];
+        a = [1 1 CP.CarMass*velXB(i-1)^2/CrseData(i,3); -(CP.WheelBase-CP.CG(1)) CP.CG(1) 0];
         b = rref(a);
-            
+
         % Required front and frear forces
         FfyReq = b(1,3);
         FryReq = b(2,3);
-            
-        % Calculates theoretical max velocity of this segment assuming front limited
-        VmaxF = sqrt(CP.TireCf*Frz(i-1)*(1+CP.CG(1)/(CP.WheelBase-CP.CG(1)))*CrseData(i,3)/CP.CarMass); 
-        
 
-        % Calculates theoreticl max velocity of this segment assuming rear limited
-        VmaxR = sqrt(CP.TireCf*Ffz(i-1)*CP.WheelBase/CP.CG(1)*CrseData(i,3)/CP.CarMass); 
-            
+        % Calculate max lateral and tractional Forces from the Tires
+        FfyMax = -Pacejka4(-Ffz(i-1),slipAmax,pac_fy);
+        FryMax = -Pacejka4(-Frz(i-1),slipAmax,pac_fy);
+
+        FfxMax = Pacejka4(-Ffz(i-1),slipRmax,pac_fx);
+        FrxMax = Pacejka4(-Frz(i-1),slipRmax,pac_fx);
+
+        if abs(velXB(i-1)) < v_thresh
+            FfyMax = CP.TireCf*Ffz(i-1);
+            FryMax = CP.TireCf*Frz(i-1);
+            FfxMax = CP.TireCf*Ffz(i-1);
+            FrxMax = CP.TireCf*Frz(i-1);
+        end
+
+        % Calculates theoretical max velocity of this segment assuming...
+        VmaxF = sqrt(FfyMax*CP.WheelBase/CP.CG(1)*CrseData(i,3)/CP.CarMass); % front limited
+        VmaxR = sqrt(FryMax*(1+CP.CG(1)/(CP.WheelBase-CP.CG(1)))*CrseData(i,3)/CP.CarMass); % rear limited
+
         % If the previous iteration velocity (time step in the future) is higher then we want to coast. 
         % Otherwise, we want to brake.
-        if velB(i-1) > min([VmaxF VmaxR])
-                
+        if velXB(i-1) > min([VmaxF VmaxR])
+
             % If front limited, Fry is derived from Ffy
             if VmaxF < VmaxR
-                velB(i) = VmaxF;
-                Ffy(i) = Ffz(i-1)*CP.TireCf;
+                velXB(i) = VmaxF;
+                Ffy(i) = FfyMax;
                 Fry(i) = Ffy(i)*(CP.WheelBase - CP.CG(1))/CP.CG(1);
             % If rear limited, Ffy is derived from Fry
             else
-                velB(i) = VmaxR;
-                Fry(i) = Frz(i-1)*CP.TireCf;
+                velXB(i) = VmaxR;
+                Fry(i) = FryMax;
                 Ffy(i) = Fry(i)*CP.CG(1)/(CP.WheelBase - CP.CG(1));
             end
-            
+
             % Acceleration is 0 because we are coasting
-            accelB(i) = 0;
+            accelXB(i) = 0;
 
             % Calculate drag based on the aero parameters
-            Frx(i) = 1/2*Fdrag1*velB(i-1)^2;
-            Ffx(i) = 1/2*Fdrag1*velB(i-1)^2;
+            Frx(i) = 0; %%1/2*Fdrag1*velXB(i-1)^2
+            Ffx(i) = 0; %%1/2*Fdrag1*velXB(i-1)^2;
+
+         elseif velXB(i-1) > MotorLimitSpeed
             
-        else
-        
-            % Full breaking
+            % Set velocity of current segment to theoretical max
+            velXB(i) = MotorLimitSpeed;
+            accelXB(i) = 0; %-Fdrag1*velA(i-1)^2/CP.CarMass; 
+
+            % Set lateral forces to the required ones
             Ffy(i) = FfyReq;
             Fry(i) = FryReq;
             
-            % Longitudinal acceleration is based on tire parameters
-            Ffx(i) = sqrt((CP.TireCf*Ffz(i-1))^2-Ffy(i)^2);
-            Frx(i) = sqrt((CP.TireCf*Frz(i-1))^2-Fry(i)^2);
-            
-            % Power = Force * Velocity
-            %OutputPower = (Ffx(i)+Frx(i))*velB(i-1);
-                
-            %if OutputPower(i) > CP.Pmax*CP.MechEff
-            %    d = (CP.Pmax)/OutputPower(i);          
-            %    Ffx(i) = Ffx(i)*d;
-            %    Frx(i) = Frx(i)*d;              
-            %end
-                
-            % Longitudinal force balance to find the acceleration, classical kinematics to find the velocity
-            accelB(i) = (Ffx(i) + Frx(i) + Fdrag1*velB(i-1)^2)/CP.CarMass;
-            velB(i) = sqrt(velB(i-1)^2 + 2*accelB(i)*CrseData(i-1,4));  
-                
-        end
+            % Longitudinal forces 0 since we are just coasting
+            Ffx(i) = 0; %1/2*Fdrag1*velA(i-1)^2;  
+            Frx(i) = 0; %1/2*Fdrag1*velA(i-1)^2;
         
+        else
+
+            % Set lateral forces to the required ones
+            Ffy(i) = FfyReq;
+            Fry(i) = FryReq;
+
+            % Friction Ellipse Coefficients (remaining longitudinal capacity after lateral demand)
+            ffe = sqrt(1 - ((FfyReq^2) / (FfyMax^2)));
+            rfe = sqrt(1 - ((FryReq^2) / (FryMax^2)));
+
+            if isnan(ffe); ffe = 1; end
+            if isnan(rfe); rfe = 1; end
+
+            % Per-axle longitudinal capacity remaining after lateral (cornering) demand is satisfied
+            FxF_avail = ffe * FfxMax;
+            FxR_avail = rfe * FrxMax;
+            
+            BrakeBias = 0.4; 
+            % Couple front/rear through a single fixed bias ratio (like a real balance bar/MC bore ratio),
+            % capped by whichever axle saturates first
+            F_total_max = min(FxF_avail/BrakeBias, FxR_avail/(1-BrakeBias));
+
+            Ffx(i) = BrakeBias * F_total_max;
+            Frx(i) = (1 - BrakeBias) * F_total_max;
+
+
+
+            % % 4 Wheel Drive Code
+            % WheelRpm = velXB(i-1)*60/(2*pi*CP.Rtire);
+            % MotorRpm = WheelRpm*CP.Nratio;
+            % MaxWheelTorque = interp1(MotorLimit_500V(:,1), MotorLimit_500V(:,2),MotorRpm,'nearest')*CP.Nratio;
+            % 
+            % % Available Motor Torque Limiting
+            % % Front Wheel Drive
+            % if frontWheelDrive
+            %     if Ffx(i)*CP.Rtire > MaxWheelTorque*2
+            %         Ffx(i) = MaxWheelTorque*2/CP.Rtire; 
+            %     end
+            % else
+            %     Ffx(i) = 0;
+            % end
+            % 
+            % if Frx(i)*CP.Rtire > MaxWheelTorque*2
+            %     Frx(i) = MaxWheelTorque*2/CP.Rtire; 
+            % end
+            % 
+            % % Power = Force * Velocity
+            % if frontWheelDrive
+            %     OutputPower = (Ffx(i)+Frx(i))*velXB(i-1);
+            % else
+            %     OutputPower = (Frx(i))*velXB(i-1);
+            % end
+            % 
+            % % Power Limiting
+            % if OutputPower > CP.Pmax*CP.MechEff
+            %     d = (CP.Pmax*CP.MechEff)/(OutputPower);
+            % 
+            %     Ffx(i) = Ffx(i)*d; 
+            %     Frx(i) = Frx(i)*d;
+            % end
+
+            % Longitudinal force balance to find the acceleration, classical kinematics to find the velocity
+            accelXB(i) = (Ffx(i) + Frx(i) + Fdrag1*velXB(i-1)^2)/CP.CarMass;
+            accelYB(i) = (Ffy(i) + Fry(i))/CP.CarMass;
+
+            velXB(i) = sqrt(velXB(i-1)^2 + 2*accelXB(i)*CrseData(i,4));  
+            velYB(i) = sqrt(velYB(i-1)^2 + 2*accelYB(i)*CrseData(i,4));  
+
+        end
+
         % Track length left is the previous track length - the length of the current segment
         posB(i) = posB(i-1)-CrseData(i,4);
 
         % (Same calculation as pre-loop.)
         % Calculates initial front and rear wheel forces in the z direction
         % Matrix of the force and moment balance on the XZ plane, RREF to solve for the z forces
-        a = [1 1 CP.CarMass*9.81+Fdown1*velB(i-1)^2; 
-            +(CP.WheelBase - CP.CG(1)) -CP.CG(1) -(Frx(i)+Ffx(i))*CP.CG(2)+Fdown1*velB(i-1)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velB(i-1)^2*(AP.CP(2) - CP.CG(2))];
+        a = [1 1 CP.CarMass*9.81+Fdown1*velXB(i)^2; 
+            -(CP.WheelBase - CP.CG(1)) CP.CG(1) -(Frx(i)+Ffx(i))*CP.CG(2)-Fdown1*velXB(i)^2*(CP.CG(1) - AP.CP(1))+Fdrag1*velXB(i)^2*(AP.CP(2) - CP.CG(2))];
         b = rref(a);
-        
+
         Ffz(i) = b(1,3);
         Frz(i) = b(2,3);
-        Fdrag(i) = Fdrag1*velA(i-1)^2;
+        Fdrag(i) = Fdrag1*velXB(i)^2;
 
     end
+
+
+
 
     %  --------------------------------------------------------------------  %
     %  Post-loop data formatting
     %  --------------------------------------------------------------------  %
+    velXB(end) = velXB(end-1);
 
     % Flip kinematics vectors since we iterated through the loop backwards
-    velB = flip(velB);
-    posB = flip(posB);
-    accelB = flip(accelB);
+    posB    = flip(posB);
+    velXB   = flip(velXB);
+    accelXB = flip(accelXB);
 
     % Format kinematics vectors into an (n x 3) matrix
-    SectorDataB(:,1) = velB(:);
-    SectorDataB(:,2) = accelB(:);
+    SectorDataB(:,1) = velXB(:);
+    SectorDataB(:,2) = accelXB(:);
     SectorDataB(:,3) = posB(:);
 
     % Format force vectors into an (n x 7) matrix (flipped as well)
@@ -374,8 +517,8 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     CrseData = flip(CrseData);
 
     % Preallocate (n x 3) matrix for combined force vector data
-    SectorDataC(:,1) = zeros(1,length(velA));
-    SectorDataC(:,2) = zeros(1,length(accelA));
+    SectorDataC(:,1) = zeros(1,length(velXA));
+    SectorDataC(:,2) = zeros(1,length(accelXA));
     SectorDataC(:,3) = zeros(1,length(posA));
 
     % Preallocate (n x 7) matrix for combined kinematics vector data
@@ -395,10 +538,10 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     %  time step. All in all this gives us our forwards-backwards method.
     %  --------------------------------------------------------------------  %
     for i = 1:min(length(SectorDataB), length(SectorDataA))
-    
+
         % If the Acceleration curve has a higher velocity use those data
         % points, otherwise use the Braking curve
-        if SectorDataA(i,1) < SectorDataB(i,1)
+        if SectorDataB(i,1) > SectorDataA(i,1)
             SectorDataC(i,1) = SectorDataA(i,1); % Velocity
             SectorDataC(i,2) = SectorDataA(i,2); % Acceleration
             SectorDataC(i,3) = SectorDataA(i,3); % Position
@@ -411,6 +554,9 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         end
         
     end
+
+    SectorDataC(:,9) = SectorDataA(:,1);
+    SectorDataC(:,10) = SectorDataB(:,1);
 
     %  --------------------------------------------------------------------  %
     %  Data Processing
@@ -454,11 +600,15 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
         % Front Energy = (Front Power / MechEff) * dt * 2 
         if SectorDataC(i,5) > 0
             SectorDataC(i,7) = (SectorDataC(i,5)/CP.MechEff)*SectorDataC(i,4)*2;
+        else
+            SectorDataC(i,7) = 0;
         end
             
         % Rear Energy = (Rear Power / MechEff) * dt * 2 
         if SectorDataC(i,6) > 0
             SectorDataC(i,8) = (SectorDataC(i,6)/CP.MechEff)*SectorDataC(i,4)*2;  
+        else
+            SectorDataC(i,8) = 0;
         end
         
     end
@@ -466,20 +616,5 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     % Calculate the Energy Used over the Lap
     EnergyUse = sum(SectorDataC(:,7)) + sum(SectorDataC(:,8));
     EnergyUsed = EnergyUse/(1000*3600);
-    
-    %figure
-    %plot(SectorDataC(:,3),ForceDataC(:,3)*CP.Rtire, SectorDataC(:,3), ForceDataC(:,4)*CP.Rtire)
-    
-    %     figure
-    %     plot(SectorDataA(:,3), SectorDataA(:,1),'r')
-    %     hold on
-    %     plot(SectorDataB(:,3), SectorDataB(:,1),'b')
-    %     plot(SectorDataC(:,3), SectorDataC(:,1),'g')
-    %     title("Velocity Profile")
-    %     legend("Acceleration Profile","Braking Profile","Combined Profile")
-    %     xlabel("Distance (m)")
-    %     xlim([0 850])
-    %     ylabel("Velocity (m/s)")
-    %     hold off
 
 end

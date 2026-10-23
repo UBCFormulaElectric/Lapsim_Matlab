@@ -92,9 +92,9 @@ function [] = runSweep(SelectedParameter, SweepRange, CP, AP, CourseData_AC, Cou
                 [~, ~, TotalT_Acc] = AccelSim(CPLocal,APLocal,0.001,75);
                 %SectorDataSave(:,:,i) = SectorDataC;
 
-                Score_AC(i) = AutocrossCompScoreCalc(TotalT_AC);
-                Score_EN(i) = EnduranceComScoreCalc(TotalT_EN*ENScalar); 
-                Score_Acc(i) = AccelerationCompScoreCalc(TotalT_Acc);
+                Score_AC(i) = CompScoring.AutocrossCompScoreCalc(TotalT_AC);
+                Score_EN(i) = CompScoring.EnduranceComScoreCalc(TotalT_EN*ENScalar); 
+                Score_Acc(i) = CompScoring.AccelerationCompScoreCalc(TotalT_Acc);
 
                 Multiplier = Multiplier + increment;
             

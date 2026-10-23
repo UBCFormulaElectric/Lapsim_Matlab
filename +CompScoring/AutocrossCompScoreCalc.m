@@ -1,7 +1,7 @@
 function [autocrossCompScore] = AutocrossCompScoreCalc(autocrossLapTime)
     %Determined from FSAE Electric 2024 Results
-    Tmin = 46.776; 
-    Tmax = 67.825; 
+    Tmin = 45.734; 
+    Tmax = 66.315; 
 
     if(autocrossLapTime > Tmax) 
         
