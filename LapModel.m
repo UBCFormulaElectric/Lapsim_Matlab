@@ -445,7 +445,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
                     
                 Ffx(i) = Ffx(i)*d; 
                 Frx(i) = Frx(i)*d;
-            end
+            end 
 
             % Longitudinal force balance to find the acceleration, classical kinematics to find the velocity
             accelXB(i) = (Ffx(i) + Frx(i) + Fdrag1*velXB(i-1)^2)/CP.CarMass;
