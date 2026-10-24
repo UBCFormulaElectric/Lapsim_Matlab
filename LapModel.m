@@ -56,6 +56,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     fields = {'Shaft_Torque','Id_RMS','Iq_RMS','Stator_Current_Phase_RMS',...
               'Vd_RMS','Vq_RMS','Total_Loss','Stator_Copper_Loss',...
               'Iron_Loss','Magnet_Loss','Mechanical_Loss'};
+
     % makes an 1by 1 array for each map (REPLACE THIS WITH ONLY MAP 100)
     maps80 = struct(); maps120 = struct();
     
@@ -71,11 +72,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     MotorLimit_500V = load("MotorLimit_500V.mat");
     MotorLimit_500V = MotorLimit_500V.MotorLimit_500V;
     
-    %MotorLimitSpeed = 19900*(2*pi*CP.Rtire)/(60*CP.Nratio);
-    %edit 1
-    %fprintf("maxVector %d\n",max(rpm_vec));
-
-    MotorLimitSpeed = max(rpm_vec)*(2*pi*CP.Rtire)/(60*CP.Nratio);
+    MotorLimitSpeed = max(rpm_vec)*(2*pi*CP.Rtire)/(60*CP.Nratio); %max(rpm_vec) is 20,000
 
     %MotorLimitSpeed = 30; %Based on Motor Curves?
 
@@ -238,19 +235,12 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             MotorRpm = WheelRpm*CP.Nratio;
 
             %% todo wowie (if statements below)
-            %To run motor function, we have Motor Rpm, assume temp is const 100, find the torque request, we have the maps and limits
-            %with the actual torque from the motor function, recalculate/limit the Ffx and Ffr check if the force makes sence(ie it is reasonalbe) (can just manually set it to equal the actual force)
             %Add power limiting SoC which we have the map for, just need to use the motor model to get current (input for the map)
-
-            %edit 2
-            %MaxWheelTorque = interp1(MotorLimit_500V(:,1), MotorLimit_500V(:,2),MotorRpm,'nearest')*CP.Nratio;
 
             motorTemp = 100; % Celcius
             %Nratio is mechanical gear ratio
             %checks if it is 4 wheel drive vs 2 wheel drive, like if there is front motor vs only rear
-            
-            %edit 3
-           
+                        
             if frontWheelDrive 
                 desiredMotorTorqueFront = (Ffx(i) * CP.Rtire)/(CP.Nratio*2); %RPM and Torque is inversely related, as torque increases rpm decreases
             else 
@@ -269,34 +259,12 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             end
             Frx(i) = (outRear.Torque * CP.Nratio*2)/CP.Rtire;
 
-            
-
-            % Available Motor Torque Limiting
-            % Front Wheel Drive
-
-            %{
-            if frontWheelDrive
-                if Ffx(i)*CP.Rtire > MaxWheelTorque*2
-                    Ffx(i) = MaxWheelTorque*2/CP.Rtire; 
-                end
-            else
-                Ffx(i) = 0;
-            end
-                
-            if Frx(i)*CP.Rtire > MaxWheelTorque*2
-                Frx(i) = MaxWheelTorque*2/CP.Rtire; 
-            end
-            %}
-
             %Power = Force * Velocity
             if frontWheelDrive
                 OutputPower = (Ffx(i)+Frx(i))*velXA(i-1);
             else
                 OutputPower = (Frx(i))*velXA(i-1);
             end
-
-            
-
                 
             % Power Limiting
             if OutputPower > CP.Pmax*CP.MechEff
@@ -500,8 +468,6 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
 
             Ffx(i) = BrakeBias * F_total_max;
             Frx(i) = (1 - BrakeBias) * F_total_max;
-
-
 
             % % 4 Wheel Drive Code
             % WheelRpm = velXB(i-1)*60/(2*pi*CP.Rtire);
