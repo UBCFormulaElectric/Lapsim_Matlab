@@ -35,10 +35,34 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     %  --------------------------------------------------------------------  %
     CrseData = CourseName;
 
-    MotorLimit_500V = load("MotorLimit_500V.mat");
-    MotorLimit_500V = MotorLimit_500V.MotorLimit_500V;
+    % Load MAT files
+    data100 = load('A2370DD_T100C.mat');
+
+    % Axes setup 
+    rpm_vec = data100.Speed(:,1);          
+    T_vec   = data100.Shaft_Torque(1,:);
+
+    %Limits
+    I_max   = 105;         % Arms
+    V_dc    = 350;         % V (nominal DC bus)
+    V_margin= 30;          % V reserve margin
     
-    MotorLimitSpeed = 19900*(2*pi*CP.Rtire)/(60*CP.Nratio);
+    limits = struct('I_max', I_max, 'V_dc', V_dc, 'V_margin', V_margin);
+
+    % Build gridded interpolnts
+    fields = {'Shaft_Torque','Id_RMS','Iq_RMS','Stator_Current_Phase_RMS',...
+              'Vd_RMS','Vq_RMS','Total_Loss','Stator_Copper_Loss',...
+              'Iron_Loss','Magnet_Loss','Mechanical_Loss'};
+    % makes an 1by 1 array for each map (REPLACE THIS WITH ONLY MAP 100)
+    maps100 = struct();
+    
+    % loads the maps with the look up values
+    for i = 1:length(fields)
+        f = fields{i};
+        maps100.(f) = griddedInterpolant({rpm_vec, T_vec}, data100.(f), 'linear','nearest');
+    end
+
+    MotorLimitSpeed = max(rpm_vec)*(2*pi*CP.Rtire)/(60*CP.Nratio); %max(rpm_vec) = 20,000
     %MotorLimitSpeed = 30; %Based on Motor Curves?
 
     if ModelOptions.four_wheel_drive == 1
@@ -198,21 +222,31 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             % 4 Wheel Drive Code
             WheelRpm = velXA(i-1)*60/(2*pi*CP.Rtire);
             MotorRpm = WheelRpm*CP.Nratio;
-            MaxWheelTorque = interp1(MotorLimit_500V(:,1), MotorLimit_500V(:,2),MotorRpm,'nearest')*CP.Nratio;
                 
             % Available Motor Torque Limiting
             % Front Wheel Drive
+
+            %% todo wowie (if statements below)
+            %Add power limiting SoC which we have the map for, just need to use the motor model to get current (input for the map)  
+           
+            if frontWheelDrive 
+                desiredMotorTorqueFront = (Ffx(i) * CP.Rtire)/(CP.Nratio*2); %RPM and Torque is inversely related, as torque increases rpm decreases
+            else 
+                desiredMotorTorqueFront = 0;
+            end 
+            desiredMotorTorqueRear = (Frx(i) * CP.Rtire)/(CP.Nratio*2);
+            
+            %this is the return of the motor function maps
+            outFront = motor_map_model_function(MotorRpm, desiredMotorTorqueFront, maps100, limits);
+            outRear = motor_map_model_function(MotorRpm, desiredMotorTorqueRear, maps100, limits);
+
             if frontWheelDrive
-                if Ffx(i)*CP.Rtire > MaxWheelTorque*2
-                    Ffx(i) = MaxWheelTorque*2/CP.Rtire; 
-                end
+                Ffx(i) = (outFront.Torque * CP.Nratio*2)/CP.Rtire;
             else
                 Ffx(i) = 0;
             end
-                
-            if Frx(i)*CP.Rtire > MaxWheelTorque*2
-                Frx(i) = MaxWheelTorque*2/CP.Rtire; 
-            end
+            Frx(i) = (outRear.Torque * CP.Nratio*2)/CP.Rtire;
+
 
             % Power = Force * Velocity
             if frontWheelDrive
