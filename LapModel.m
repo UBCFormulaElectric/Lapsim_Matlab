@@ -330,6 +330,29 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     % 
     %  We complete this process over the entire track.
     %  --------------------------------------------------------------------  %
+    % Mechanical brake capacity (constant throughout the lap)
+    % Draft parameters: confirm against the current brake design before use.
+    brakePedalForce = 428;        % N; force quoted at estimated tire lockup
+    brakePedalRatio = 5.1;
+    brakeFrontForceFraction = 0.55; % Assumed hydraulic force split; verify BBAL meaning
+    brakeMasterArea = 0.000220;  % m^2, assumed equal front/rear
+    brakeFrontCaliperArea = 0.002027; % m^2 per front wheel; verify effective piston area
+    brakeRearCaliperArea = 0.001013;  % m^2 per rear wheel; verify effective piston area
+    brakePadMu = 0.41;
+    brakeEffectiveRotorRadius = 0.150; % m; verify effective friction radius
+
+    % Pressure -> torque per wheel -> force per axle (two wheels per axle)
+    brakeFrontPressure = brakePedalForce * brakePedalRatio * ...
+        brakeFrontForceFraction / brakeMasterArea;
+    brakeRearPressure = brakePedalForce * brakePedalRatio * ...
+        (1 - brakeFrontForceFraction) / brakeMasterArea;
+    brakeFrontTorque = brakeFrontPressure * brakeFrontCaliperArea * ...
+        brakePadMu * brakeEffectiveRotorRadius;
+    brakeRearTorque = brakeRearPressure * brakeRearCaliperArea * ...
+        brakePadMu * brakeEffectiveRotorRadius;
+    frontBrakeMax = 2 * brakeFrontTorque / CP.Rtire; % N, entire front axle
+    rearBrakeMax = 2 * brakeRearTorque / CP.Rtire;   % N, entire rear axle
+
     for i = 2:length(CrseData)   % Loops through all track points assuming braking forces
 
         % Using the same matrix RREF method we calculate the front and rear forces in the lateral direction
@@ -402,50 +425,54 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             Ffy(i) = FfyReq;
             Fry(i) = FryReq;
 
-            % Friction Ellipse Coefficients
-            ffe = sqrt(1 - ((FfyReq^2) / (FfyMax^2)));
-            rfe = sqrt(1 - ((FryReq^2) / (FryMax^2)));
-
-            if isnan(ffe); ffe = 1; end
-            if isnan(rfe); rfe = 1; end
-
-            % Longitudinal acceleration is based on tire parameters
-            Ffx(i) = ffe * FfxMax;
-            Frx(i) = rfe * FrxMax;
-
-             % Power = Force * Velocity
-            if frontWheelDrive
-                OutputPower = (Ffx(i)+Frx(i))*velXB(i-1);
+            % Available longitudinal grip after accounting for cornering.
+            % The force limits from Pacejka are for each axle in this model.
+            if FfyMax > 0
+                ffe = sqrt(max(0, 1 - (FfyReq / FfyMax)^2));
             else
-                OutputPower = (Frx(i))*velXB(i-1);
+                ffe = 0;
+            end
+            if FryMax > 0
+                rfe = sqrt(max(0, 1 - (FryReq / FryMax)^2));
+            else
+                rfe = 0;
             end
 
-            % 4 Wheel Drive Code
-            WheelRpm = velXB(i-1)*60/(2*pi*CP.Rtire);
-            MotorRpm = WheelRpm*CP.Nratio;
-            MaxWheelTorque = interp1(MotorLimit_500V(:,1), MotorLimit_500V(:,2),MotorRpm,'nearest')*CP.Nratio;
-                
-            % Available Motor Torque Limiting
-            % Front Wheel Drive
-            if frontWheelDrive
-                if Ffx(i)*CP.Rtire > MaxWheelTorque*2
-                    Ffx(i) = MaxWheelTorque*2/CP.Rtire; 
-                end
-            else
-                Ffx(i) = 0;
-            end
-                
-            if Frx(i)*CP.Rtire > MaxWheelTorque*2
-                Frx(i) = MaxWheelTorque*2/CP.Rtire; 
-            end
-                
-            % Power Limiting
-            if OutputPower > CP.Pmax*CP.MechEff
-                d = (CP.Pmax*CP.MechEff)/(OutputPower);
-                    
-                Ffx(i) = Ffx(i)*d; 
-                Frx(i) = Frx(i)*d;
-            end 
+            frontTireBrakeLimit = ffe * max(0, FfxMax);
+            rearTireBrakeLimit = rfe * max(0, FrxMax);
+
+            % Use the lower of the tire-grip and mechanical-brake limits.
+            % Positive force magnitudes are used in the backward speed pass;
+            % the combined output changes their sign at the end of the pass.
+            Ffx(i) = min(frontTireBrakeLimit, frontBrakeMax);
+            Frx(i) = min(rearTireBrakeLimit, rearBrakeMax);
+
+            % % 4 Wheel Drive Code
+            % WheelRpm = velXB(i-1)*60/(2*pi*CP.Rtire);
+            % MotorRpm = WheelRpm*CP.Nratio;
+            % MaxWheelTorque = interp1(MotorLimit_500V(:,1), MotorLimit_500V(:,2),MotorRpm,'nearest')*CP.Nratio;
+            % 
+            % % Available Motor Torque Limiting
+            % % Front Wheel Drive
+            % if frontWheelDrive
+            %     if Ffx(i)*CP.Rtire > MaxWheelTorque*2
+            %         Ffx(i) = MaxWheelTorque*2/CP.Rtire; 
+            %     end
+            % else
+            %     Ffx(i) = 0;
+            % end
+            % 
+            % if Frx(i)*CP.Rtire > MaxWheelTorque*2
+            %     Frx(i) = MaxWheelTorque*2/CP.Rtire; 
+            % end
+            % 
+            % % Power Limiting
+            % if OutputPower > CP.Pmax*CP.MechEff
+            %     d = (CP.Pmax*CP.MechEff)/(OutputPower);
+            % 
+            %     Ffx(i) = Ffx(i)*d; 
+            %     Frx(i) = Frx(i)*d;
+            % end 
 
             % Longitudinal force balance to find the acceleration, classical kinematics to find the velocity
             accelXB(i) = (Ffx(i) + Frx(i) + Fdrag1*velXB(i-1)^2)/CP.CarMass;
