@@ -90,7 +90,45 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
     % Same-segment force solver settings (total axle force in N).
     forceTol = 0.1;
     maxForceIter = 60;
-    BrakeBias = 0.4;
+    % Brake model selection (simulation only; draft hydraulic inputs below).
+    % Optional ModelOptions.brake_mode:
+    %   "legacy"     : original 40% front bias, tire-limited only
+    %   "bias_only"  : hydraulic-model bias, tire-limited only
+    %   "mechanical" : hydraulic-model bias and mechanical force limits (default)
+    brakeMode = "mechanical";
+    if isfield(ModelOptions,'brake_mode')
+        brakeMode = string(ModelOptions.brake_mode);
+    end
+    if ~isscalar(brakeMode) || ~any(brakeMode == ["legacy","bias_only","mechanical"])
+        error('LapModel:InvalidBrakeMode','Unknown brake_mode.');
+    end
+    if brakeMode == "legacy"
+        BrakeBias = 0.4;
+        brakeCaps = [Inf,Inf];
+    else
+        % Draft parameters from the supplied brake model. These are not
+        % validated hardware specifications or a real-world safety check.
+        brakePedalForce = 428;            % N
+        brakePedalRatio = 5.1;
+        brakeFrontForceFraction = 0.55;   % assumed master-cylinder force split
+        brakeMasterArea = 0.000220;      % m^2, equal front/rear
+        brakeCaliperArea = [0.002027,0.001013]; % m^2, effective per wheel
+        brakePadMu = 0.41;
+        brakeEffectiveRotorRadius = 0.150; % m
+        validateattributes(CP.Rtire,{'numeric'}, ...
+            {'scalar','real','finite','positive'});
+        brakePressure = brakePedalForce*brakePedalRatio* ...
+            [brakeFrontForceFraction,1-brakeFrontForceFraction]/brakeMasterArea;
+        brakeTorque = brakePressure.*brakeCaliperArea* ...
+            brakePadMu*brakeEffectiveRotorRadius; % Nm per wheel
+        brakeCaps = 2*brakeTorque/CP.Rtire;       % N per axle
+        % Hydraulic input split is not the wheel-force split because the
+        % front and rear effective piston areas differ.
+        BrakeBias = brakeCaps(1)/sum(brakeCaps);
+        if brakeMode == "bias_only"
+            brakeCaps = [Inf,Inf];
+        end
+    end
 
     % Start/Stop Conditions
     vStart = ModelOptions.start_velocity;
@@ -150,7 +188,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             velXA(i-1), CrseData(i,3), ds, false, CP, AP, ...
             Fdown1, Fdrag1, pac_fx, pac_fy, slipRmax, slipAmax, ...
             v_thresh, MotorLimitSpeed, frontWheelDrive, maps100, limits, ...
-            forceTol, maxForceIter, BrakeBias);
+            forceTol, maxForceIter, BrakeBias, brakeCaps);
 
         accelYA(i) = (Ffy(i) + Fry(i))/CP.CarMass;
         velYA(i) = sqrt(max(0, velYA(i-1)^2 + ...
@@ -245,7 +283,7 @@ function [SectorDataC, ForceDataC, TotalT, LapLength, EnergyUsed] = LapModel(CP,
             velXB(i-1), CrseData(i,3), ds, true, CP, AP, ...
             Fdown1, Fdrag1, pac_fx, pac_fy, slipRmax, slipAmax, ...
             v_thresh, MotorLimitSpeed, frontWheelDrive, maps100, limits, ...
-            forceTol, maxForceIter, BrakeBias);
+            forceTol, maxForceIter, BrakeBias, brakeCaps);
 
         accelYB(i) = (Ffy(i) + Fry(i))/CP.CarMass;
         velYB(i) = sqrt(max(0, velYB(i-1)^2 + ...
@@ -390,14 +428,14 @@ end
 % -------------------------------------------------------------------------
 function [vNext, ax, FxF, FxR, FyF, FyR, FzF, FzR, drag] = solveSegment( ...
     v, radius, ds, braking, CP, AP, kd, kg, pac_fx, pac_fy, ...
-    slipR, slipA, v_thresh, motorSpeed, fourWD, maps, limits, tol, maxIter, bias)
+    slipR, slipA, v_thresh, motorSpeed, fourWD, maps, limits, tol, maxIter, bias, brakeCaps)
 
     m = CP.CarMass;
     L = CP.WheelBase;
     c = CP.CG(1);
     h = CP.CG(2);
     direction = 1 - 2*double(braking);
-    if ~isreal(v) || ~isfinite(v) || v < 0 || isnan(radius) || ...
+    if ~isreal(v) || ~isfinite(v) || v < 0 || ~isreal(radius) || isnan(radius) || ...
              ~isfinite(ds) || ds < 0
         error('LapModel:InvalidSegment', 'Invalid speed, radius or segment length.');
     end
@@ -408,8 +446,6 @@ function [vNext, ax, FxF, FxR, FyF, FyR, FzF, FzR, drag] = solveSegment( ...
     else
         curvature = 1/abs(radius);
     end
-
-    curvature = 1/abs(radius);
 
     % First establish the pure-cornering/motor speed envelope independently
     % of trial longitudinal force. This prevents force-dependent switching
@@ -454,6 +490,12 @@ function [vNext, ax, FxF, FxR, FyF, FyR, FzF, FzR, drag] = solveSegment( ...
         forceCap = max(0, m*(vCap^2-v^2)/(2*ds) + direction*drag);
     else
         forceCap = 0;
+    end
+
+    % Mechanical brake limits also bound the shared pedal-force search.
+    if braking
+        forceCap = min([forceCap, brakeCaps(1)/bias, ...
+            brakeCaps(2)/(1-bias)]);
     end
 
     % Find a feasible lower bound and an infeasible upper bound.
@@ -550,7 +592,10 @@ function [vNext, ax, FxF, FxR, FyF, FyR, FzF, FzR, drag] = solveSegment( ...
         if braking
             front = bias*totalFx;
             rear = (1-bias)*totalFx;
-            ok = front <= caps(1) && rear <= caps(2);
+            % One shared braking demand: neither axle may exceed its own
+            % combined-slip tire capacity or mechanical brake capacity.
+            availableBrake = min(caps,brakeCaps);
+            ok = front <= availableBrake(1) && rear <= availableBrake(2);
         else
             rpm = v*60*CP.Nratio/(2*pi*CP.Rtire);
             if ~fourWD
