@@ -6,10 +6,12 @@ function [autocrossCompScore] = AutocrossCompScoreCalc(autocrossLapTime)
     if(autocrossLapTime > Tmax) 
         
         autocrossCompScore = 6.5;
+    elseif(autocrossLapTime < Tmin)
 
-
+            autocrossCompScore = 125;
     else
         autocrossCompScore = 118.5*(Tmax/autocrossLapTime -  1)/(Tmax/Tmin - 1) + 6.5;
+   
     end 
     
 end
